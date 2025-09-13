@@ -89,12 +89,29 @@ query GetProducts($first:Int!) {
         StartCoroutine(FetchProductsCoroutine());
     }
     
-    private void Update()
+    [Header("Input Settings")]
+    [SerializeField] private InputActionReference instantiateAction; // Reference to the action that will trigger model instantiation
+    
+    private void OnEnable()
     {
-        // Press Space key to instantiate the first model in the list
-        if (Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame && Items.Count > 0)
+        // Subscribe to the instantiate action
+        if (instantiateAction != null)
+            instantiateAction.action.performed += OnInstantiateActionPerformed;
+    }
+    
+    private void OnDisable()
+    {
+        // Unsubscribe from the instantiate action
+        if (instantiateAction != null)
+            instantiateAction.action.performed -= OnInstantiateActionPerformed;
+    }
+    
+    private void OnInstantiateActionPerformed(InputAction.CallbackContext context)
+    {
+        // Check if we have items to instantiate
+        if (Items.Count > 0)
         {
-            Debug.Log("Space key pressed. Instantiating first model.");
+            Debug.Log("Instantiate action performed. Instantiating first model.");
             InstantiateModel(0);
         }
     }
