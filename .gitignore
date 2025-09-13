@@ -27,6 +27,7 @@
 *.opendb
 *.VC.db
 *.VC.VC.opendb
+.env 
 
 # Unity3D generated file on crash reports
 sysinfo.txt

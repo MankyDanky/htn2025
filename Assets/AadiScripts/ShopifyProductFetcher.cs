@@ -12,8 +12,25 @@ public class ShopifyProductFetcher : MonoBehaviour
 
     // === Config ===
     [Header("Shopify Storefront API")]
-    [SerializeField] private string endpoint = "https://htn2025.myshopify.com/api/2025-07/graphql.json";
-    [SerializeField] private string storefrontAccessToken = "3ac484ccaacdb6de9defa51a8f8aabdf";
+    [SerializeField] private string endpoint;
+    [SerializeField] private string storefrontAccessToken;
+
+    private void Awake()
+    {
+        // Load .env values
+        var envPath = System.IO.Path.Combine(Application.dataPath, "..", ".env");
+        if (System.IO.File.Exists(envPath))
+        {
+            var lines = System.IO.File.ReadAllLines(envPath);
+            foreach (var line in lines)
+            {
+                if (line.StartsWith("SHOPIFY_STOREFRONT_ACCESS_TOKEN="))
+                    storefrontAccessToken = line.Substring("SHOPIFY_STOREFRONT_ACCESS_TOKEN=".Length);
+                if (line.StartsWith("SHOPIFY_ENDPOINT="))
+                    endpoint = line.Substring("SHOPIFY_ENDPOINT=".Length);
+            }
+        }
+    }
     [SerializeField, Tooltip("How many products to fetch on the first page")]
     private int first = 25;
 
