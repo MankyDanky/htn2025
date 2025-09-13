@@ -46,7 +46,7 @@ public class ShopifyProductFetcher : MonoBehaviour
     [SerializeField] private bool autoInstantiate = true; // Auto-instantiate models on fetch
     [SerializeField] private float modelScale = 0.5f; // Scale factor for models
 
-    // GraphQL query: products with id/title/description and media (Model3d + Image/Video)
+    // GraphQL query: products with id/title/description, media, and pricing
     private const string Query = @"
 query GetProducts($first:Int!) {
   products(first: $first) {
@@ -58,6 +58,11 @@ query GetProducts($first:Int!) {
         handle
         title
         description
+        priceRange {
+          minVariantPrice {
+            amount
+          }
+        }
         media(first: 10) {
           edges {
             node {
@@ -79,6 +84,8 @@ query GetProducts($first:Int!) {
         public string title;
         public string description;
         public string modelUrl; // preferred GLB if available
+        public Texture2D image; // Product image
+        public float cost; // Product cost
         public GameObject instantiatedModel; // Reference to the instantiated model in the scene
         public bool isLoading; // Track loading state
     }
@@ -163,6 +170,17 @@ query GetProducts($first:Int!) {
         public string title;
         public string description;
         public Media media;
+        public PriceRange priceRange;
+    }
+
+    [Serializable] private class PriceRange
+    {
+        public VariantPrice minVariantPrice;
+    }
+
+    [Serializable] private class VariantPrice
+    {
+        public string amount;
     }
 
     [Serializable] private class Media
@@ -260,6 +278,8 @@ query GetProducts($first:Int!) {
 
                 var p = edge.node;
                 var modelUrl = ExtractBestModelUrl(p.media);
+                var imageUrl = ExtractImageUrl(p.media);
+                var cost = ExtractCost(p.priceRange);
 
                 var item = new VRItem
                 {
@@ -267,14 +287,21 @@ query GetProducts($first:Int!) {
                     title = p.title,
                     description = string.IsNullOrEmpty(p.description) ? "" : p.description,
                     modelUrl = modelUrl,
+                    cost = cost,
                     isLoading = false
                 };
                 Items.Add(item);
+
+                // Start downloading the image if available
+                if (!string.IsNullOrEmpty(imageUrl))
+                {
+                    StartCoroutine(DownloadImageCoroutine(imageUrl, Items.Count - 1));
+                }
             }
 
             Debug.Log($"Fetched {Items.Count} product(s). Example[0]: " +
                       (Items.Count > 0
-                          ? $"{Items[0].title} | {Items[0].id} | modelUrl={(string.IsNullOrEmpty(Items[0].modelUrl) ? "N/A" : Items[0].modelUrl)}"
+                          ? $"{Items[0].title} | {Items[0].id} | modelUrl={(string.IsNullOrEmpty(Items[0].modelUrl) ? "N/A" : Items[0].modelUrl)} | cost=${Items[0].cost}"
                           : "N/A"));
         }
     }
@@ -312,6 +339,72 @@ query GetProducts($first:Int!) {
         }
 
         return null; // No 3D model found
+    }
+
+    /// <summary>
+    /// Extracts the first image URL from media
+    /// </summary>
+    private string ExtractImageUrl(Media media)
+    {
+        if (media?.edges == null) return null;
+
+        foreach (var me in media.edges)
+        {
+            var node = me?.node;
+            if (node == null) continue;
+
+            if (node.__typename == "MediaImage" && node.image != null && !string.IsNullOrEmpty(node.image.url))
+            {
+                return node.image.url;
+            }
+        }
+
+        return null; // No image found
+    }
+
+    /// <summary>
+    /// Extracts cost from price range
+    /// </summary>
+    private float ExtractCost(PriceRange priceRange)
+    {
+        if (priceRange?.minVariantPrice?.amount == null) return 0f;
+
+        if (float.TryParse(priceRange.minVariantPrice.amount, out float cost))
+        {
+            return cost;
+        }
+
+        return 0f;
+    }
+
+    /// <summary>
+    /// Downloads an image from URL and assigns it to the VRItem
+    /// </summary>
+    private IEnumerator DownloadImageCoroutine(string imageUrl, int itemIndex)
+    {
+        if (string.IsNullOrEmpty(imageUrl) || itemIndex < 0 || itemIndex >= Items.Count)
+            yield break;
+
+        using (UnityWebRequest www = UnityWebRequestTexture.GetTexture(imageUrl))
+        {
+            yield return www.SendWebRequest();
+
+            if (www.result == UnityWebRequest.Result.Success)
+            {
+                Texture2D texture = DownloadHandlerTexture.GetContent(www);
+                if (texture != null && itemIndex < Items.Count)
+                {
+                    VRItem item = Items[itemIndex];
+                    item.image = texture;
+                    Items[itemIndex] = item;
+                    Debug.Log($"Downloaded image for {item.title}");
+                }
+            }
+            else
+            {
+                Debug.LogWarning($"Failed to download image from {imageUrl}: {www.error}");
+            }
+        }
     }
     
     /// <summary>
