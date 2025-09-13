@@ -5,6 +5,7 @@ using System.Text;
 using System.IO;
 using UnityEngine;
 using UnityEngine.Networking;
+using UnityEngine.InputSystem;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -80,13 +81,22 @@ query GetProducts($first:Int!) {
         public string modelUrl; // preferred GLB if available
         public GameObject instantiatedModel; // Reference to the instantiated model in the scene
         public bool isLoading; // Track loading state
-        public bool loadingFailed; // Track if loading failed
     }
 
     // ---------- Unity ----------
     private void Start()
     {
         StartCoroutine(FetchProductsCoroutine());
+    }
+    
+    private void Update()
+    {
+        // Press Space key to instantiate the first model in the list
+        if (Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame && Items.Count > 0)
+        {
+            Debug.Log("Space key pressed. Instantiating first model.");
+            InstantiateModel(0);
+        }
     }
 
     // ---------- Networking ----------
@@ -240,8 +250,7 @@ query GetProducts($first:Int!) {
                     title = p.title,
                     description = string.IsNullOrEmpty(p.description) ? "" : p.description,
                     modelUrl = modelUrl,
-                    isLoading = false,
-                    loadingFailed = false
+                    isLoading = false
                 };
                 Items.Add(item);
             }
@@ -250,12 +259,6 @@ query GetProducts($first:Int!) {
                       (Items.Count > 0
                           ? $"{Items[0].title} | {Items[0].id} | modelUrl={(string.IsNullOrEmpty(Items[0].modelUrl) ? "N/A" : Items[0].modelUrl)}"
                           : "N/A"));
-                          
-            // Instantiate models if auto-instantiate is enabled
-            if (autoInstantiate)
-            {
-                StartCoroutine(InstantiateModelsCoroutine());
-            }
         }
     }
 
@@ -316,36 +319,15 @@ query GetProducts($first:Int!) {
         }
         modelContainer.transform.localPosition = position;
         
-        // Create a loading indicator
-        GameObject loadingIndicator = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        loadingIndicator.name = "LoadingIndicator";
-        loadingIndicator.transform.SetParent(modelContainer.transform);
-        loadingIndicator.transform.localPosition = Vector3.zero;
-        loadingIndicator.transform.localScale = Vector3.one * 0.3f;
-        
-        // Set a different material color for loading indicator
-        Renderer renderer = loadingIndicator.GetComponent<Renderer>();
-        if (renderer != null)
-        {
-            Material mat = new Material(renderer.material);
-            mat.color = new Color(1f, 0.6f, 0f, 0.8f); // Orange-ish
-            renderer.material = mat;
-        }
-        
         // Create a GLTFast importer
         var gltfImport = new GltfImport();
         
         // Start loading the model
         var importTask = gltfImport.Load(url);
         
-        // Wait for the import to complete while animating the loading indicator
-        float rotationSpeed = 120f;
+        // Wait for the import to complete
         while (!importTask.IsCompleted)
         {
-            if (loadingIndicator != null)
-            {
-                loadingIndicator.transform.Rotate(0, rotationSpeed * Time.deltaTime, 0);
-            }
             yield return null;
         }
         
@@ -353,8 +335,6 @@ query GetProducts($first:Int!) {
         
         if (success)
         {
-            Debug.Log("Model loaded successfully, instantiating...");
-            
             // Create a game object to hold the model with proper scale
             GameObject modelRoot = new GameObject("ModelRoot");
             modelRoot.transform.SetParent(modelContainer.transform);
@@ -367,10 +347,6 @@ query GetProducts($first:Int!) {
             // Wait for instantiation to complete
             while (!instantiateTask.IsCompleted)
             {
-                if (loadingIndicator != null)
-                {
-                    loadingIndicator.transform.Rotate(0, rotationSpeed * Time.deltaTime, 0);
-                }
                 yield return null;
             }
             
@@ -378,18 +354,6 @@ query GetProducts($first:Int!) {
             
             if (success)
             {
-                Debug.Log("Model instantiated successfully");
-                
-                // Apply any additional model setup here
-                // Fix any unexpected orientation issues if needed
-                // modelRoot.transform.localRotation = Quaternion.Euler(0, 180, 0); // Uncomment if models face wrong direction
-                
-                // Clean up the loading indicator
-                if (loadingIndicator != null)
-                {
-                    Destroy(loadingIndicator);
-                }
-                
                 // Return the container with the model
                 onComplete?.Invoke(modelContainer, true);
             }
@@ -454,23 +418,11 @@ query GetProducts($first:Int!) {
                     // Update our item with the result
                     VRItem updatedItem = Items[itemIndex];
                     updatedItem.isLoading = false;
-                    updatedItem.loadingFailed = !success;
                     
                     if (success && modelGO != null)
                     {
                         // Set name
                         modelGO.name = $"Model_{updatedItem.title}";
-                        
-                        // Add a label with the product title
-                        GameObject labelGO = new GameObject($"Label_{updatedItem.title}");
-                        labelGO.transform.SetParent(modelGO.transform);
-                        labelGO.transform.localPosition = Vector3.up * 0.5f; // Position above model
-                        
-                        TextMesh textMesh = labelGO.AddComponent<TextMesh>();
-                        textMesh.text = updatedItem.title;
-                        textMesh.fontSize = 14;
-                        textMesh.alignment = TextAlignment.Center;
-                        textMesh.anchor = TextAnchor.LowerCenter;
                         
                         // Store reference to instantiated model
                         updatedItem.instantiatedModel = modelGO;
@@ -508,6 +460,22 @@ query GetProducts($first:Int!) {
         }
         
         StartCoroutine(InstantiateSingleModelCoroutine(index));
+    }
+    
+    /// <summary>
+    /// Public method to instantiate a model by item ID
+    /// </summary>
+    public void InstantiateModelById(string itemId)
+    {
+        int index = Items.FindIndex(item => item.id == itemId);
+        if (index >= 0)
+        {
+            InstantiateModel(index);
+        }
+        else
+        {
+            Debug.LogError($"No item found with ID: {itemId}");
+        }
     }
     
     /// <summary>
@@ -549,23 +517,11 @@ query GetProducts($first:Int!) {
                 // Update our item with the result
                 VRItem updatedItem = Items[index];
                 updatedItem.isLoading = false;
-                updatedItem.loadingFailed = !success;
                 
                 if (success && modelGO != null)
                 {
                     // Set name
                     modelGO.name = $"Model_{updatedItem.title}";
-                    
-                    // Add a label with the product title
-                    GameObject labelGO = new GameObject($"Label_{updatedItem.title}");
-                    labelGO.transform.SetParent(modelGO.transform);
-                    labelGO.transform.localPosition = Vector3.up * 0.5f; // Position above model
-                    
-                    TextMesh textMesh = labelGO.AddComponent<TextMesh>();
-                    textMesh.text = updatedItem.title;
-                    textMesh.fontSize = 14;
-                    textMesh.alignment = TextAlignment.Center;
-                    textMesh.anchor = TextAnchor.LowerCenter;
                     
                     // Store reference to instantiated model
                     updatedItem.instantiatedModel = modelGO;
