@@ -2,8 +2,13 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Text;
+using System.IO;
 using UnityEngine;
 using UnityEngine.Networking;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
+using GLTFast;
 
 public class ShopifyProductFetcher : MonoBehaviour
 {
@@ -33,6 +38,12 @@ public class ShopifyProductFetcher : MonoBehaviour
     }
     [SerializeField, Tooltip("How many products to fetch on the first page")]
     private int first = 25;
+    
+    [Header("Model Settings")]
+    [SerializeField] private Transform modelsParent; // Parent for instantiated models
+    [SerializeField] private Vector3 modelSpacing = new Vector3(1.5f, 0, 0); // Spacing between models
+    [SerializeField] private bool autoInstantiate = true; // Auto-instantiate models on fetch
+    [SerializeField] private float modelScale = 0.5f; // Scale factor for models
 
     // GraphQL query: products with id/title/description and media (Model3d + Image/Video)
     private const string Query = @"
@@ -67,6 +78,9 @@ query GetProducts($first:Int!) {
         public string title;
         public string description;
         public string modelUrl; // preferred GLB if available
+        public GameObject instantiatedModel; // Reference to the instantiated model in the scene
+        public bool isLoading; // Track loading state
+        public bool loadingFailed; // Track if loading failed
     }
 
     // ---------- Unity ----------
@@ -225,7 +239,9 @@ query GetProducts($first:Int!) {
                     id = p.id,
                     title = p.title,
                     description = string.IsNullOrEmpty(p.description) ? "" : p.description,
-                    modelUrl = modelUrl
+                    modelUrl = modelUrl,
+                    isLoading = false,
+                    loadingFailed = false
                 };
                 Items.Add(item);
             }
@@ -234,6 +250,12 @@ query GetProducts($first:Int!) {
                       (Items.Count > 0
                           ? $"{Items[0].title} | {Items[0].id} | modelUrl={(string.IsNullOrEmpty(Items[0].modelUrl) ? "N/A" : Items[0].modelUrl)}"
                           : "N/A"));
+                          
+            // Instantiate models if auto-instantiate is enabled
+            if (autoInstantiate)
+            {
+                StartCoroutine(InstantiateModelsCoroutine());
+            }
         }
     }
 
@@ -270,5 +292,288 @@ query GetProducts($first:Int!) {
         }
 
         return null; // No 3D model found
+    }
+    
+    /// <summary>
+    /// Downloads and instantiates a model from URL using GLTFast
+    /// </summary>
+    private IEnumerator DownloadModelCoroutine(string url, Transform parent, Vector3 position, float scale, Action<GameObject, bool> onComplete)
+    {
+        if (string.IsNullOrEmpty(url))
+        {
+            Debug.LogError("Model URL is null or empty");
+            onComplete?.Invoke(null, false);
+            yield break;
+        }
+        
+        Debug.Log($"Loading model from URL: {url}");
+        
+        // Create a container for the model
+        GameObject modelContainer = new GameObject("ModelContainer");
+        if (parent != null)
+        {
+            modelContainer.transform.SetParent(parent, false);
+        }
+        modelContainer.transform.localPosition = position;
+        
+        // Create a loading indicator
+        GameObject loadingIndicator = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        loadingIndicator.name = "LoadingIndicator";
+        loadingIndicator.transform.SetParent(modelContainer.transform);
+        loadingIndicator.transform.localPosition = Vector3.zero;
+        loadingIndicator.transform.localScale = Vector3.one * 0.3f;
+        
+        // Set a different material color for loading indicator
+        Renderer renderer = loadingIndicator.GetComponent<Renderer>();
+        if (renderer != null)
+        {
+            Material mat = new Material(renderer.material);
+            mat.color = new Color(1f, 0.6f, 0f, 0.8f); // Orange-ish
+            renderer.material = mat;
+        }
+        
+        // Create a GLTFast importer
+        var gltfImport = new GltfImport();
+        
+        // Start loading the model
+        var importTask = gltfImport.Load(url);
+        
+        // Wait for the import to complete while animating the loading indicator
+        float rotationSpeed = 120f;
+        while (!importTask.IsCompleted)
+        {
+            if (loadingIndicator != null)
+            {
+                loadingIndicator.transform.Rotate(0, rotationSpeed * Time.deltaTime, 0);
+            }
+            yield return null;
+        }
+        
+        bool success = importTask.Result;
+        
+        if (success)
+        {
+            Debug.Log("Model loaded successfully, instantiating...");
+            
+            // Create a game object to hold the model with proper scale
+            GameObject modelRoot = new GameObject("ModelRoot");
+            modelRoot.transform.SetParent(modelContainer.transform);
+            modelRoot.transform.localPosition = Vector3.zero;
+            modelRoot.transform.localScale = Vector3.one * scale;
+            
+            // Instantiate the model
+            var instantiateTask = gltfImport.InstantiateMainSceneAsync(modelRoot.transform);
+            
+            // Wait for instantiation to complete
+            while (!instantiateTask.IsCompleted)
+            {
+                if (loadingIndicator != null)
+                {
+                    loadingIndicator.transform.Rotate(0, rotationSpeed * Time.deltaTime, 0);
+                }
+                yield return null;
+            }
+            
+            success = instantiateTask.Result;
+            
+            if (success)
+            {
+                Debug.Log("Model instantiated successfully");
+                
+                // Apply any additional model setup here
+                // Fix any unexpected orientation issues if needed
+                // modelRoot.transform.localRotation = Quaternion.Euler(0, 180, 0); // Uncomment if models face wrong direction
+                
+                // Clean up the loading indicator
+                if (loadingIndicator != null)
+                {
+                    Destroy(loadingIndicator);
+                }
+                
+                // Return the container with the model
+                onComplete?.Invoke(modelContainer, true);
+            }
+            else
+            {
+                Debug.LogError("Failed to instantiate model");
+                Destroy(modelContainer);
+                onComplete?.Invoke(null, false);
+            }
+        }
+        else
+        {
+            Debug.LogError($"Failed to load model from {url}");
+            Destroy(modelContainer);
+            onComplete?.Invoke(null, false);
+        }
+    }
+
+    /// <summary>
+    /// Instantiates all the models in the Items list
+    /// </summary>
+    private IEnumerator InstantiateModelsCoroutine()
+    {
+        // Create parent if needed
+        if (modelsParent == null)
+        {
+            GameObject parentGO = new GameObject("ShopifyModels");
+            modelsParent = parentGO.transform;
+            parentGO.transform.position = transform.position + Vector3.forward * 2; // Place models in front of this object
+        }
+        
+        // Track position for layout
+        Vector3 nextPosition = Vector3.zero;
+        
+        // Loop through all items with model URLs
+        for (int i = 0; i < Items.Count; i++)
+        {
+            VRItem item = Items[i];
+            
+            // Skip if no model URL or already loading
+            if (string.IsNullOrEmpty(item.modelUrl) || item.isLoading)
+                continue;
+                
+            Debug.Log($"Loading model {i+1}/{Items.Count}: {item.title}");
+            
+            // Mark as loading
+            item.isLoading = true;
+            Items[i] = item; // Update the list item
+            
+            // Calculate position for this model
+            Vector3 modelPosition = nextPosition;
+            nextPosition += modelSpacing;
+            
+            // Load the model
+            int itemIndex = i; // Capture for callback
+            StartCoroutine(DownloadModelCoroutine(
+                item.modelUrl,
+                modelsParent,
+                modelPosition,
+                modelScale,
+                (GameObject modelGO, bool success) => {
+                    // Update our item with the result
+                    VRItem updatedItem = Items[itemIndex];
+                    updatedItem.isLoading = false;
+                    updatedItem.loadingFailed = !success;
+                    
+                    if (success && modelGO != null)
+                    {
+                        // Set name
+                        modelGO.name = $"Model_{updatedItem.title}";
+                        
+                        // Add a label with the product title
+                        GameObject labelGO = new GameObject($"Label_{updatedItem.title}");
+                        labelGO.transform.SetParent(modelGO.transform);
+                        labelGO.transform.localPosition = Vector3.up * 0.5f; // Position above model
+                        
+                        TextMesh textMesh = labelGO.AddComponent<TextMesh>();
+                        textMesh.text = updatedItem.title;
+                        textMesh.fontSize = 14;
+                        textMesh.alignment = TextAlignment.Center;
+                        textMesh.anchor = TextAnchor.LowerCenter;
+                        
+                        // Store reference to instantiated model
+                        updatedItem.instantiatedModel = modelGO;
+                    }
+                    
+                    // Update the item in our list
+                    Items[itemIndex] = updatedItem;
+                }
+            ));
+            
+            // Wait a bit between model loads to avoid overwhelming the system
+            yield return new WaitForSeconds(0.1f);
+        }
+        
+        Debug.Log("Finished instantiating all models");
+    }
+    
+    /// <summary>
+    /// Public method to instantiate all models
+    /// </summary>
+    public void InstantiateModels()
+    {
+        StartCoroutine(InstantiateModelsCoroutine());
+    }
+    
+    /// <summary>
+    /// Public method to instantiate a specific model by index
+    /// </summary>
+    public void InstantiateModel(int index)
+    {
+        if (index < 0 || index >= Items.Count)
+        {
+            Debug.LogError($"Invalid model index: {index}. Valid range: 0-{Items.Count-1}");
+            return;
+        }
+        
+        StartCoroutine(InstantiateSingleModelCoroutine(index));
+    }
+    
+    /// <summary>
+    /// Instantiates a single model by index
+    /// </summary>
+    private IEnumerator InstantiateSingleModelCoroutine(int index)
+    {
+        // Similar to InstantiateModelsCoroutine but for a single model
+        VRItem item = Items[index];
+        
+        // Skip if no model URL or already loading
+        if (string.IsNullOrEmpty(item.modelUrl) || item.isLoading)
+            yield break;
+        
+        // Create parent if needed
+        if (modelsParent == null)
+        {
+            GameObject parentGO = new GameObject("ShopifyModels");
+            modelsParent = parentGO.transform;
+            parentGO.transform.position = transform.position + Vector3.forward * 2; // Place models in front
+        }
+        
+        // Mark as loading
+        item.isLoading = true;
+        Items[index] = item; // Update the list item
+        
+        // Calculate position
+        Vector3 modelPosition = modelSpacing * index;
+        
+        Debug.Log($"Loading model: {item.title}");
+        
+        // Load the model using our internal method
+        StartCoroutine(DownloadModelCoroutine(
+            item.modelUrl,
+            modelsParent,
+            modelPosition,
+            modelScale,
+            (GameObject modelGO, bool success) => {
+                // Update our item with the result
+                VRItem updatedItem = Items[index];
+                updatedItem.isLoading = false;
+                updatedItem.loadingFailed = !success;
+                
+                if (success && modelGO != null)
+                {
+                    // Set name
+                    modelGO.name = $"Model_{updatedItem.title}";
+                    
+                    // Add a label with the product title
+                    GameObject labelGO = new GameObject($"Label_{updatedItem.title}");
+                    labelGO.transform.SetParent(modelGO.transform);
+                    labelGO.transform.localPosition = Vector3.up * 0.5f; // Position above model
+                    
+                    TextMesh textMesh = labelGO.AddComponent<TextMesh>();
+                    textMesh.text = updatedItem.title;
+                    textMesh.fontSize = 14;
+                    textMesh.alignment = TextAlignment.Center;
+                    textMesh.anchor = TextAnchor.LowerCenter;
+                    
+                    // Store reference to instantiated model
+                    updatedItem.instantiatedModel = modelGO;
+                }
+                
+                // Update the item in our list
+                Items[index] = updatedItem;
+            }
+        ));
     }
 }
