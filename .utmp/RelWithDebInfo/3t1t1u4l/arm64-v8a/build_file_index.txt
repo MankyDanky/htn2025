@@ -1,0 +1,2 @@
+C:\Users\Frost\Code\HTN2025\htn2025\Library\Bee\Android\Prj\IL2CPP\Gradle\unityLibrary\src\main\cpp\CMakeLists.txt
+C:\Users\Frost\Code\HTN2025\htn2025\Library\Bee\Android\Prj\IL2CPP\Gradle\unityLibrary\src\main\cpp\GameActivity\CMakeLists.txt

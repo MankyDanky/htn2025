@@ -1,5 +1,7 @@
+using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
-using UnityEngineUI;
+using UnityEngine.UI;
 using TMPro;
 
 public class ShopifyUIManager : MonoBehaviour
@@ -12,7 +14,7 @@ public class ShopifyUIManager : MonoBehaviour
     void Start()
     {
         // Wait for fetcher to finish loading, then populate UI fields:
-        StartCoroutine(WaitAndPopulate());
+        StartCoroutine(WaitAndUpdate());
     }
 
     private IEnumerator WaitAndUpdate()
@@ -29,8 +31,8 @@ public class ShopifyUIManager : MonoBehaviour
         foreach (var item in fetcher.Items)
         {
             var cardGO = Instantiate(productCardPrefab, gridParent);
-            var card = cardGO.GetComponent<ProductCardUI>();
-            card.Init(item, fetcher);
+            // var card = cardGO.GetComponent<ProductCardUI>();
+            // card.Init(item, fetcher);
         }
     }
 }
