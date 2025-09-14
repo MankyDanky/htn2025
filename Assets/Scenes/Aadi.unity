@@ -2017,6 +2017,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4ebfbacb35d39e64090fd8d3396e74ce, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  storeUI: {fileID: 0}
   Items: []
   endpoint: https://htn2025.myshopify.com/api/2025-07/graphql.json
   storefrontAccessToken: 3ac484ccaacdb6de9defa51a8f8aabdf
@@ -11479,7 +11480,7 @@ RectTransform:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1410118268}
-  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: -0.1}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
