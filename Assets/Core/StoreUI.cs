@@ -55,13 +55,26 @@ public class StoreUI : MonoBehaviour
     public void SetCurrentItem(int index)
     {
         if (index < 0 || index >= UIItems.Count) return;
+        currentItem = index;
         
         // Shift HSV for indication
         float H, S, V;
         Color.RGBToHSV(testMat.color, out H, out S, out V);
         testMat.color = Color.HSVToRGB((H + 50 / 360.0f) % 1.0f, S, V);
+
+        GameObject newObj = fetcher.Items[currentItem].instantiatedModel;
+        newObj.SetActive(true);
+        Transform newTransform = fetcher.Items[currentItem].instantiatedModel.transform;
+        newTransform.parent = placeTarget.transform;
         
+        var filter = newObj.GetComponent<MeshFilter>();
+        if (filter != null && filter.sharedMesh != null)
+        {
+            Bounds localBounds = filter.sharedMesh.bounds;
+            newTransform.localPosition = Vector3.up * localBounds.extents.y;
+        }
         
+
         /* Later...
         GameObject newModel = Instantiate(UIItems[index].item.instantiatedModel);
         newModel.transform.position = handTest.transform.position;
@@ -91,6 +104,21 @@ public class StoreUI : MonoBehaviour
                     placeTarget.transform.up = hit.normal;
                 }
             }
+        }
+        
+        if (OVRInput.GetDown(OVRInput.Button.SecondaryIndexTrigger))
+        {
+            placing = false;
+            if (currentItem >= 0 && currentItem < UIItems.Count)
+            {
+                Transform newTransform = fetcher.Items[currentItem].instantiatedModel.transform;
+                newTransform.parent = null;
+            }
+            /*
+            GameObject spawned = Instantiate(prefab, transform.position, transform.rotation);
+            Rigidbody rb = spawned.AddComponent<Rigidbody>();
+            rb.linearVelocity = transform.forward * speed;
+            */
         }
     }
 
