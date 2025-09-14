@@ -12,17 +12,15 @@ public class CheckoutManager : MonoBehaviour
     public string endpoint;
     public string storeFrontAccessToken;
 
-    // Calculates the total cost for a list of product ID's:
     public void GetCartTotal(List<string> productIds, System.Action<string> onTotalReady)
     {
         StartCoroutine(GetCartTotalCoroutine(productIds, onTotalReady));
     }
 
-    // GetCartTotalCoroutine:
     private IEnumerator GetCartTotalCoroutine(List<string> productIds, System.Action<string> onTotalReady)
     {
-        // Build GraphQL query to fetch prices for all ID's:
-        string idsQuery = string.Join(",", productIds.ConvertAll(idsQuery => $"\"{id}"));
+        // Build GraphQL query to fetch prices for all IDs:
+        string idsQuery = string.Join(",", productIds.ConvertAll(id => $"\"{id}\""));
         string query = $@"
         query {{
             nodes(ids: [{idsQuery}]) {{
@@ -37,7 +35,8 @@ public class CheckoutManager : MonoBehaviour
             }}
         }}";
 
-        var body = new { query = query };
+        // Serialize query body
+        var body = new GraphQLBody { query = query };
         string json = JsonUtility.ToJson(body);
 
         using (var req = new UnityWebRequest(endpoint, "POST"))
@@ -61,7 +60,6 @@ public class CheckoutManager : MonoBehaviour
             string response = req.downloadHandler.text;
             float total = 0f;
 
-            // Simple JSON parsing:
             foreach (var id in productIds)
             {
                 string priceKey = $"\"id\":\"{id}\"";
@@ -79,6 +77,28 @@ public class CheckoutManager : MonoBehaviour
                 }
             }
             onTotalReady?.Invoke($"${total:F2}");
+        }
+    }
+
+    [Serializable]
+    private class GraphQLBody
+    {
+        public string query;
+    }
+
+    private void Awake()
+    {
+        var envPath = Path.Combine(Application.dataPath, "..", ".env");
+        if (File.Exists(envPath))
+        {
+            var lines = File.ReadAllLines(envPath);
+            foreach (var line in lines)
+            {
+                if (line.StartsWith("SHOPIFY_STOREFRONT_ACCESS_TOKEN="))
+                    storeFrontAccessToken = line.Substring("SHOPIFY_STOREFRONT_ACCESS_TOKEN=".Length);
+                if (line.StartsWith("SHOPIFY_ENDPOINT="))
+                    endpoint = line.Substring("SHOPIFY_ENDPOINT=".Length);
+            }
         }
     }
 }
