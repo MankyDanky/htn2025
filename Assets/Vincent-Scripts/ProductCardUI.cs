@@ -20,7 +20,7 @@ public class ProductCardUI : MonoBehaviour
         fetcher = fetcherRef;
         titleText.text = item.title;
         // Load thumbail
-        viewButton.onClick.AddListener(OnViewClicked);
+        // viewButton.onClick.AddListner(OnViewClicked);
     }
 
     private void OnViewClicked()
