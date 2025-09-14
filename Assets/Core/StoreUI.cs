@@ -56,7 +56,7 @@ public class StoreUI : MonoBehaviour
     {
         if (index < 0 || index >= UIItems.Count) return;
         currentItem = index;
-        
+
         // Shift HSV for indication
         float H, S, V;
         Color.RGBToHSV(testMat.color, out H, out S, out V);
@@ -66,13 +66,11 @@ public class StoreUI : MonoBehaviour
         newObj.SetActive(true);
         Transform newTransform = fetcher.Items[currentItem].instantiatedModel.transform;
         newTransform.parent = placeTarget.transform;
-        
+
         var filter = newObj.GetComponent<MeshFilter>();
-        if (filter != null && filter.sharedMesh != null)
-        {
-            Bounds localBounds = filter.sharedMesh.bounds;
-            newTransform.localPosition = Vector3.up * localBounds.extents.y;
-        }
+        newTransform.localPosition = Vector3.zero;
+        newTransform.localRotation = Quaternion.identity;
+        newTransform.localScale = Vector3.one * 1.2f;
         
 
         /* Later...
