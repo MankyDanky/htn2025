@@ -25,6 +25,17 @@ public class ShopifyProductFetcher : MonoBehaviour
 
     private void Awake()
     {
+        // Set up singleton reference
+        if (Instance == null)
+        {
+            Instance = this;
+        }
+        else if (Instance != this)
+        {
+            Destroy(gameObject);
+            return;
+        }
+        
         // Load .env values
         var envPath = System.IO.Path.Combine(Application.dataPath, "..", ".env");
         if (System.IO.File.Exists(envPath))
@@ -47,6 +58,8 @@ public class ShopifyProductFetcher : MonoBehaviour
     [SerializeField] private Vector3 modelSpacing = new Vector3(1.5f, 0, 0); // Spacing between models
     [SerializeField] private bool autoInstantiate = true; // Auto-instantiate models on fetch
     [SerializeField] private float modelScale = 0.5f; // Scale factor for models
+    [SerializeField] private bool preloadModelsAtStart = false; // Preload models in the background
+    [SerializeField] private Vector3 prefabStoragePosition = new Vector3(1000, 0, 0); // Far away from the origin
 
     // GraphQL query: products with id/title/description, media, and pricing
     private const string Query = @"
@@ -97,31 +110,13 @@ query GetProducts($first:Int!) {
     {
         StartCoroutine(FetchProductsCoroutine());
     }
-    
-    [Header("Input Settings")]
-    [SerializeField] private InputActionReference instantiateAction; // Reference to the action that will trigger model instantiation
-    
-    private void OnEnable()
+
+    // Add a callback for when products are fetched
+    private void OnProductsFetched()
     {
-        // Subscribe to the instantiate action
-        if (instantiateAction != null)
-            instantiateAction.action.performed += OnInstantiateActionPerformed;
-    }
-    
-    private void OnDisable()
-    {
-        // Unsubscribe from the instantiate action
-        if (instantiateAction != null)
-            instantiateAction.action.performed -= OnInstantiateActionPerformed;
-    }
-    
-    private void OnInstantiateActionPerformed(InputAction.CallbackContext context)
-    {
-        // Check if we have items to instantiate
-        if (Items.Count > 0)
+        if (preloadModelsAtStart)
         {
-            Debug.Log("Instantiate action performed. Instantiating first model.");
-            InstantiateModel(0);
+            StartCoroutine(PreloadAllModelsCoroutine());
         }
     }
 
@@ -305,6 +300,10 @@ query GetProducts($first:Int!) {
                       (Items.Count > 0
                           ? $"{Items[0].title} | {Items[0].id} | modelUrl={(string.IsNullOrEmpty(Items[0].modelUrl) ? "N/A" : Items[0].modelUrl)} | cost=${Items[0].cost}"
                           : "N/A"));
+    
+            // Notify that products have been fetched
+            OnProductsFetched();
+            yield break;
         }
     }
 
@@ -647,4 +646,167 @@ query GetProducts($first:Int!) {
             }
         ));
     }
+    
+    /// <summary>
+    /// Preloads all models in the background and stores them for quick instantiation
+    /// </summary>
+    private IEnumerator PreloadAllModelsCoroutine()
+    {
+        Debug.Log("Starting background preloading of all models...");
+        
+        // Create a parent container for preloaded models if needed
+        if (modelsParent == null)
+        {
+            GameObject parentGO = new GameObject("ShopifyModelsContainer");
+            modelsParent = parentGO.transform;
+        }
+        
+        // Create a storage area for prefabs - far from the origin
+        GameObject prefabStorageArea = new GameObject("PrefabStorageArea");
+        prefabStorageArea.transform.SetParent(modelsParent);
+        prefabStorageArea.transform.position = prefabStoragePosition;
+        
+        // Process models in the background using a low priority coroutine
+        int totalModels = 0;
+        int successfullyLoaded = 0;
+        
+        // Calculate total models to load
+        foreach (var item in Items)
+        {
+            if (!string.IsNullOrEmpty(item.modelUrl))
+                totalModels++;
+        }
+        
+        Debug.Log($"Found {totalModels} models to preload");
+        
+        // Load each model sequentially to avoid overwhelming the system
+        for (int i = 0; i < Items.Count; i++)
+        {
+            VRItem item = Items[i];
+            
+            // Skip if no model URL or already loaded
+            if (string.IsNullOrEmpty(item.modelUrl) || item.instantiatedModel != null)
+                continue;
+            
+            // Mark as loading
+            item.isLoading = true;
+            Items[i] = item;
+            
+            // Calculate offset position within storage area
+            Vector3 modelPosition = Vector3.right * (i * 2); // Space them out
+            
+            // Use a custom yield instruction to manage the loading process
+            var loadOperation = new ModelLoadOperation(item.modelUrl, prefabStorageArea.transform, modelPosition, modelScale);
+            yield return loadOperation;
+            
+            if (loadOperation.Success && loadOperation.Result != null)
+            {
+                // Update the item with the loaded model
+                VRItem updatedItem = Items[i];
+                updatedItem.isLoading = false;
+                updatedItem.instantiatedModel = loadOperation.Result;
+                updatedItem.instantiatedModel.name = $"PreloadedModel_{updatedItem.title}";
+                
+                // Make the object inactive - it's just a template
+                updatedItem.instantiatedModel.SetActive(false);
+                
+                // Update in list
+                Items[i] = updatedItem;
+                successfullyLoaded++;
+                
+                Debug.Log($"Preloaded model {successfullyLoaded}/{totalModels}: {updatedItem.title}");
+            }
+            else
+            {
+                // Update to not loading anymore
+                VRItem updatedItem = Items[i];
+                updatedItem.isLoading = false;
+                Items[i] = updatedItem;
+                
+                Debug.LogWarning($"Failed to preload model for {item.title}");
+            }
+            
+            // Small delay between loads to avoid frame drops
+            yield return new WaitForSeconds(0.1f);
+        }
+        
+        Debug.Log($"Finished preloading {successfullyLoaded}/{totalModels} models");
+    }
+
+    /// <summary>
+    /// Custom yield instruction to manage model loading
+    /// </summary>
+    private class ModelLoadOperation : CustomYieldInstruction
+    {
+        private bool isComplete = false;
+        public bool Success { get; private set; }
+        public GameObject Result { get; private set; }
+        
+        public ModelLoadOperation(string url, Transform parent, Vector3 position, float scale)
+        {
+            // Start the loading process
+            ShopifyProductFetcher.Instance.StartCoroutine(LoadModel(url, parent, position, scale));
+        }
+        
+        private IEnumerator LoadModel(string url, Transform parent, Vector3 position, float scale)
+        {
+            // Create a container for the model
+            GameObject modelContainer = new GameObject("PreloadedModelContainer");
+            modelContainer.transform.SetParent(parent, false);
+            modelContainer.transform.localPosition = position;
+            
+            // Create a GLTFast importer
+            var gltfImport = new GltfImport();
+            
+            // Start loading the model
+            var importTask = gltfImport.Load(url);
+            
+            // Wait for the import to complete
+            while (!importTask.IsCompleted)
+            {
+                yield return null;
+            }
+            
+            if (importTask.Result)
+            {
+                // Create a game object to hold the model with proper scale
+                GameObject modelRoot = new GameObject("ModelRoot");
+                modelRoot.transform.SetParent(modelContainer.transform);
+                modelRoot.transform.localPosition = Vector3.zero;
+                modelRoot.transform.localScale = Vector3.one * scale;
+                
+                // Instantiate the model
+                var instantiateTask = gltfImport.InstantiateMainSceneAsync(modelRoot.transform);
+                
+                // Wait for instantiation to complete
+                while (!instantiateTask.IsCompleted)
+                {
+                    yield return null;
+                }
+                
+                if (instantiateTask.Result)
+                {
+                    Success = true;
+                    Result = modelContainer;
+                }
+                else
+                {
+                    Debug.LogError("Failed to instantiate model");
+                    GameObject.Destroy(modelContainer);
+                }
+            }
+            else
+            {
+                Debug.LogError($"Failed to load model from {url}");
+                GameObject.Destroy(modelContainer);
+            }
+            
+            isComplete = true;
+        }
+        
+        public override bool keepWaiting => !isComplete;
+    }
+
+    // Make the class accessible via a singleton pattern
+    public static ShopifyProductFetcher Instance { get; private set; }
 }
