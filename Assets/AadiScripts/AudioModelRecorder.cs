@@ -20,7 +20,7 @@ public class ModelGeneratorAI : MonoBehaviour
     [SerializeField] private int recordingDuration = 10;
     [SerializeField] private int sampleRate = 44100;
     [SerializeField] private string microphoneName;
-    [SerializeField] private AudioSource audioSource;
+    [SerializeField] private Mp3Loader mp3Loader;
     
     [Header("3D Model Settings")]
     [SerializeField] private float modelPollingInterval = 3f;
@@ -72,11 +72,6 @@ public class ModelGeneratorAI : MonoBehaviour
             enabled = false;
             return;
         }
-        
-        // Create audio source if needed
-        if (audioSource == null)
-            audioSource = gameObject.AddComponent<AudioSource>();
-            
         LogDebug("Settings validated successfully");
     }
     
@@ -368,92 +363,15 @@ public class ModelGeneratorAI : MonoBehaviour
                 byte[] audioBytes = www.downloadHandler.data;
                 LogDebug($"Received {audioBytes.Length} bytes of MP3 audio data");
                 
-                // Load and play the audio directly
-                StartCoroutine(LoadAudioClipFromMP3(audioBytes));
-            }
-        }
-    }
-    
-    private IEnumerator LoadAudioClipFromMP3(byte[] audioData)
-    {
-        LogDebug($"Loading AudioClip from {audioData.Length} bytes of MP3 data");
-        
-        if (audioData == null || audioData.Length == 0)
-        {
-            LogError("Audio data is null or empty");
-            if (statusText && statusText.text != "Generating 3D model...")
-                statusText.text = "No audio data received";
-            yield break;
-        }
-        
-        // Save MP3 data to temporary file
-        string tempPath = Path.Combine(Application.temporaryCachePath, "tts_temp.mp3");
-        File.WriteAllBytes(tempPath, audioData);
-        LogDebug($"Saved MP3 to temp file: {tempPath}");
-        
-        // Load using Unity's AudioClip loader
-        string fileUri = "file://" + tempPath.Replace("\\", "/");
-        LogDebug($"Loading audio from URI: {fileUri}");
-        
-        using (UnityWebRequest audioRequest = UnityWebRequestMultimedia.GetAudioClip(fileUri, AudioType.MPEG))
-        {
-            yield return audioRequest.SendWebRequest();
-            
-            if (audioRequest.result != UnityWebRequest.Result.Success)
-            {
-                LogError($"Failed to load audio clip: {audioRequest.error}");
-                if (statusText && statusText.text != "Generating 3D model...")
-                    statusText.text = "Failed to load speech";
-            }
-            else
-            {
-                AudioClip audioClip = DownloadHandlerAudioClip.GetContent(audioRequest);
+                // Load and play the audio using Mp3Loader
+                StartCoroutine(mp3Loader.PlayFromBytes(audioBytes, false));
                 
-                if (audioClip != null && audioClip.length > 0)
-                {
-                    LogDebug($"Successfully created AudioClip: {audioClip.length:F2}s, {audioClip.frequency}Hz, {audioClip.channels} channels");
-                    
-                    // Ensure AudioSource is properly configured
-                    if (audioSource == null)
-                        audioSource = gameObject.AddComponent<AudioSource>();
-                    
-                    audioSource.Stop(); // Stop any currently playing audio
-                    audioSource.clip = audioClip;
-                    audioSource.volume = 1.0f;
-                    audioSource.pitch = 1.0f;
-                    audioSource.loop = false;
-                    
-                    // Play the audio
-                    audioSource.Play();
-                    
-                    LogDebug($"Audio playing: {audioSource.isPlaying}, Volume: {audioSource.volume}");
-                    
-                    if (statusText && statusText.text != "Generating 3D model...")
-                        statusText.text = "Playing response";
-                }
-                else
-                {
-                    LogError($"Created AudioClip is null or has zero length");
-                    if (statusText && statusText.text != "Generating 3D model...")
-                        statusText.text = "Failed to create speech";
-                }
+                if (statusText && statusText.text != "Generating 3D model...")
+                    statusText.text = "Playing response";
             }
-        }
-        
-        // Clean up temp file
-        try
-        {
-            //if (File.Exists(tempPath))
-                //File.Delete(tempPath);
-        }
-        catch (Exception e)
-        {
-            LogDebug($"Could not delete temp file: {e.Message}");
         }
     }
     
-
-
     private IEnumerator Generate3DModel(string description)
     {
         LogDebug($"Generating 3D model: \"{description}\"");
