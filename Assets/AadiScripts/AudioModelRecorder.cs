@@ -5,6 +5,7 @@ using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.UI;
 using TMPro;
+using GLTFast;
 
 public class AudioModelRecorder : MonoBehaviour
 {
@@ -231,8 +232,45 @@ public class AudioModelRecorder : MonoBehaviour
                     if (statusText) statusText.text = "3D Model ready!";
                     canRecord = true;
                     
-                    // Here you could implement code to download and load the 3D model
-                    // StartCoroutine(LoadModelFromUrl(status.model_url));
+                    // Create a new VRItem and add it to the ShopifyProductFetcher's Items list
+                    if (ShopifyProductFetcher.Instance != null)
+                    {
+                        // Create a unique ID for this item
+                        string itemId = "audio_model_" + DateTime.Now.Ticks;
+                        
+                        // Create the VRItem
+                        ShopifyProductFetcher.VRItem newItem = new ShopifyProductFetcher.VRItem
+                        {
+                            id = itemId,
+                            title = "Voice Generated Model",
+                            description = "", // Empty description as requested
+                            modelUrl = status.model_url,
+                            cost = 0,
+                            isLoading = true
+                        };
+                        
+                        // Add to items list
+                        ShopifyProductFetcher.Instance.Items.Add(newItem);
+                        int itemIndex = ShopifyProductFetcher.Instance.Items.Count - 1;
+                        
+                        // Download the thumbnail if available
+                        if (!string.IsNullOrEmpty(status.thumbnail_url))
+                        {
+                            StartCoroutine(DownloadThumbnailImage(status.thumbnail_url, itemIndex));
+                        }
+                        
+                        // Position to instantiate model (far from origin)
+                        Vector3 farPosition = new Vector3(1000, 0, 50 + (itemIndex * 5));
+                        
+                        // Start coroutine to download and instantiate the model
+                        StartCoroutine(InstantiateModelAtPosition(status.model_url, itemIndex, farPosition));
+                        
+                        Debug.Log($"Added voice-generated model to item list: {status.model_url}");
+                    }
+                    else
+                    {
+                        Debug.LogWarning("ShopifyProductFetcher instance not found. Cannot add model to items list.");
+                    }
 
                     yield break;
                 }
@@ -272,6 +310,113 @@ public class AudioModelRecorder : MonoBehaviour
         public string model_url;
         public string thumbnail_url;
         public string error;
+    }
+
+    // Helper method to download thumbnail image for the item
+    private IEnumerator DownloadThumbnailImage(string imageUrl, int itemIndex)
+    {
+        using (UnityWebRequest www = UnityWebRequestTexture.GetTexture(imageUrl))
+        {
+            yield return www.SendWebRequest();
+
+            if (www.result == UnityWebRequest.Result.Success)
+            {
+                Texture2D texture = DownloadHandlerTexture.GetContent(www);
+                if (texture != null && ShopifyProductFetcher.Instance != null && 
+                    itemIndex < ShopifyProductFetcher.Instance.Items.Count)
+                {
+                    // Update the image in the VRItem
+                    ShopifyProductFetcher.VRItem item = ShopifyProductFetcher.Instance.Items[itemIndex];
+                    item.image = texture;
+                    ShopifyProductFetcher.Instance.Items[itemIndex] = item;
+                    
+                    Debug.Log($"Downloaded thumbnail for voice-generated model");
+                    
+                    // If StoreUI is available, add item to UI
+                    if (ShopifyProductFetcher.Instance.GetComponent<ShopifyProductFetcher>().storeUI != null)
+                    {
+                        ShopifyProductFetcher.Instance.GetComponent<ShopifyProductFetcher>().storeUI.AddItem(item);
+                    }
+                }
+            }
+            else
+            {
+                Debug.LogWarning($"Failed to download thumbnail image: {www.error}");
+            }
+        }
+    }
+
+    // Helper method to instantiate the model at a specific position
+    private IEnumerator InstantiateModelAtPosition(string modelUrl, int itemIndex, Vector3 position)
+    {
+        if (ShopifyProductFetcher.Instance == null)
+            yield break;
+            
+        GameObject modelParent = new GameObject($"VoiceModel_{itemIndex}");
+        modelParent.transform.position = position;
+        
+        // Use GLTFast to load the model
+        var gltfImport = new GLTFast.GltfImport();
+        
+        // Load the glTF
+        bool success = false;
+        var loadTask = gltfImport.Load(modelUrl);
+        while (true)
+        {
+            try
+            {
+                if (loadTask.IsCompleted)
+                {
+                    success = loadTask.Result;
+                    break;
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"Error loading model: {e.Message}");
+                success = false;
+                break;
+            }
+            yield return null;
+        }
+        
+        if (success)
+        {
+            // Create a child GameObject for proper scaling
+            GameObject modelRoot = new GameObject("ModelRoot");
+            modelRoot.transform.SetParent(modelParent.transform);
+            modelRoot.transform.localPosition = Vector3.zero;
+            modelRoot.transform.localScale = Vector3.one * 0.5f; // Similar scale to ShopifyProductFetcher
+            
+            // Instantiate the model
+            var instantiateTask = gltfImport.InstantiateMainSceneAsync(modelRoot.transform);
+            while (!instantiateTask.IsCompleted)
+                yield return null;
+                
+            if (instantiateTask.Result && itemIndex < ShopifyProductFetcher.Instance.Items.Count)
+            {
+                // Update the VRItem with the instantiated model
+                ShopifyProductFetcher.VRItem item = ShopifyProductFetcher.Instance.Items[itemIndex];
+                item.instantiatedModel = modelParent;
+                item.isLoading = false;
+                ShopifyProductFetcher.Instance.Items[itemIndex] = item;
+                
+                // Hide the model (it's just a template)
+                modelParent.SetActive(false);
+                
+                Debug.Log($"Successfully instantiated voice-generated model");
+            }
+            else
+            {
+                Debug.LogError("Failed to instantiate model");
+                Destroy(modelParent);
+            }
+        }
+        else
+        {
+            Debug.LogError($"Failed to load model from {modelUrl}");
+            Destroy(modelParent);
+        }
     }
 }
 

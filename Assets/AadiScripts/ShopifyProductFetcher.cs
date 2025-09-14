@@ -13,7 +13,7 @@ using GLTFast;
 
 public class ShopifyProductFetcher : MonoBehaviour
 {
-    [SerializeField] private StoreUI storeUI;
+    public StoreUI storeUI;
     
     // === Output ===
     public List<VRItem> Items = new List<VRItem>();
