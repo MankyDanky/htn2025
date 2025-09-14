@@ -16,7 +16,7 @@ public class CheckoutTest : MonoBehaviour
 
         checkoutManager.GetCartTotal(testIds, (total) =>
         {
-            Debug.Log("Cart Total: " + total);
+            Debug.Log("🛒 Cart Total: " + total);
         });
     }
 }
