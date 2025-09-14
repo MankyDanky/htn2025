@@ -29,6 +29,11 @@ public class StoreUI : MonoBehaviour
     [SerializeField] private Animator menuAnimator;
 
     [SerializeField] private Toggle toggle;
+
+    [SerializeField] private bool placing;
+    [SerializeField] private GameObject placeTarget;
+    [SerializeField] private Transform handTarget;
+    [SerializeField] private LayerMask rayMask;
     
     public void AddItem(ShopifyProductFetcher.VRItem item)
     {
@@ -41,16 +46,21 @@ public class StoreUI : MonoBehaviour
 
     public void SetCurrentItem(ItemPane itm)
     {
-        SetCurrentItem(UIItems.IndexOf(itm));
+        currentItem = UIItems.IndexOf(itm);
+        SetCurrentItem(currentItem);
+        placing = true;
+        CloseMenu();
     }
 
     public void SetCurrentItem(int index)
     {
         if (index < 0 || index >= UIItems.Count) return;
         
+        // Shift HSV for indication
         float H, S, V;
         Color.RGBToHSV(testMat.color, out H, out S, out V);
         testMat.color = Color.HSVToRGB((H + 50 / 360.0f) % 1.0f, S, V);
+        
         
         /* Later...
         GameObject newModel = Instantiate(UIItems[index].item.instantiatedModel);
@@ -68,6 +78,20 @@ public class StoreUI : MonoBehaviour
             toggle.isOn = !toggle.isOn;
             UpdateMenu();
         }
+
+        if (placing)
+        {
+            placeTarget.layer = 6;
+            if (currentItem >= 0 && currentItem < UIItems.Count)
+            {
+                RaycastHit hit;
+                if (Physics.Raycast(handTarget.position, handTarget.transform.forward, out hit, 10.0f, rayMask))
+                {
+                    placeTarget.transform.position = hit.point;
+                    placeTarget.transform.up = hit.normal;
+                }
+            }
+        }
     }
 
     public void UpdateMenu()
@@ -78,6 +102,7 @@ public class StoreUI : MonoBehaviour
 
     public void OpenMenu()
     {
+        currentItem = -1;
         menuOpen = true;
         menuAnimator.Play("Hi");
     }
