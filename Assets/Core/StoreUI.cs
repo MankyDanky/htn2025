@@ -34,7 +34,9 @@ public class StoreUI : MonoBehaviour
     [SerializeField] private GameObject placeTarget;
     [SerializeField] private Transform handTarget;
     [SerializeField] private LayerMask rayMask;
-    
+
+    [SerializeField] private List<ShopifyProductFetcher.VRItem> addedItems;
+
     public void AddItem(ShopifyProductFetcher.VRItem item)
     {
         // Create Pane, Set Store UI, Set Item
@@ -62,9 +64,9 @@ public class StoreUI : MonoBehaviour
         Color.RGBToHSV(testMat.color, out H, out S, out V);
         testMat.color = Color.HSVToRGB((H + 50 / 360.0f) % 1.0f, S, V);
 
-        GameObject newObj = fetcher.Items[currentItem].instantiatedModel;
+        GameObject newObj = UIItems[currentItem].item.instantiatedModel;
         newObj.SetActive(true);
-        Transform newTransform = fetcher.Items[currentItem].instantiatedModel.transform;
+        Transform newTransform = UIItems[currentItem].item.instantiatedModel.transform;
         newTransform.parent = placeTarget.transform;
 
         var filter = newObj.GetComponent<MeshFilter>();
@@ -109,7 +111,8 @@ public class StoreUI : MonoBehaviour
             placing = false;
             if (currentItem >= 0 && currentItem < UIItems.Count)
             {
-                Transform newTransform = fetcher.Items[currentItem].instantiatedModel.transform;
+                Transform newTransform = UIItems[currentItem].item.instantiatedModel.transform;
+                addedItems.Add(UIItems[currentItem].item);
                 newTransform.parent = null;
             }
             /*

@@ -399,6 +399,7 @@ query GetProducts($first:Int!) {
                     item.image = texture;
                     Items[itemIndex] = item;
                     Debug.Log($"Downloaded image for {item.title}");
+                    storeUI.AddItem(item);
                 }
             }
             else
@@ -408,7 +409,6 @@ query GetProducts($first:Int!) {
         }
         
         // Create in UI
-        storeUI.AddItem(Items[itemIndex]);
     }
     
     /// <summary>
