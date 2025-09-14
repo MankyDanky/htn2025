@@ -14,11 +14,14 @@ public class AudioModelRecorder : MonoBehaviour
     [SerializeField] private int sampleRate = 44100;
     [SerializeField] private string microphoneName;
     [SerializeField] private AudioSource audioSource;
-    
+
+    [SerializeField] Image notificationIcon;
+    [SerializeField] GameObject notificationPanel;
+     
     [Header("API Settings")]
     [SerializeField] private string apiUrl = "http://localhost:8000/process-audio";
-    [SerializeField] private float modelPollingInterval = 3f; // Time between status checks in seconds
-    [SerializeField] private int maxPollingAttempts = 60;    // Maximum number of attempts (3 sec * 60 = 3 minutes max)
+    [SerializeField] private float modelPollingInterval = 5f;
+    [SerializeField] private int maxPollingAttempts = 150;
     
     [Header("UI References")]
     [SerializeField] private Button recordButton;
@@ -265,6 +268,8 @@ public class AudioModelRecorder : MonoBehaviour
                         // Start coroutine to download and instantiate the model
                         StartCoroutine(InstantiateModelAtPosition(status.model_url, itemIndex, farPosition));
                         
+                        notificationPanel.SetActive(true);
+                        Debug.Log("SHOWING NOTIFICATION");
                         Debug.Log($"Added voice-generated model to item list: {status.model_url}");
                     }
                     else
@@ -311,6 +316,18 @@ public class AudioModelRecorder : MonoBehaviour
         public string thumbnail_url;
         public string error;
     }
+    
+    public void CloseNotification()
+    {
+        StartCoroutine(CloseNotificationCoroutine());
+    }
+
+    private IEnumerator CloseNotificationCoroutine()
+    {
+        notificationPanel.GetComponent<Animator>().SetTrigger("Disappear");
+        yield return new WaitForSeconds(1f);
+        notificationPanel.SetActive(false);
+    }
 
     // Helper method to download thumbnail image for the item
     private IEnumerator DownloadThumbnailImage(string imageUrl, int itemIndex)
@@ -322,16 +339,20 @@ public class AudioModelRecorder : MonoBehaviour
             if (www.result == UnityWebRequest.Result.Success)
             {
                 Texture2D texture = DownloadHandlerTexture.GetContent(www);
-                if (texture != null && ShopifyProductFetcher.Instance != null && 
+                if (texture != null && ShopifyProductFetcher.Instance != null &&
                     itemIndex < ShopifyProductFetcher.Instance.Items.Count)
                 {
                     // Update the image in the VRItem
                     ShopifyProductFetcher.VRItem item = ShopifyProductFetcher.Instance.Items[itemIndex];
                     item.image = texture;
+                    notificationIcon.sprite = Sprite.Create(
+                        texture,
+                        new Rect(0, 0, texture.width, texture.height),
+                        new Vector2(0.5f, 0.5f));
                     ShopifyProductFetcher.Instance.Items[itemIndex] = item;
-                    
+
                     Debug.Log($"Downloaded thumbnail for voice-generated model");
-                    
+
                     // If StoreUI is available, add item to UI
                     if (ShopifyProductFetcher.Instance.GetComponent<ShopifyProductFetcher>().storeUI != null)
                     {
