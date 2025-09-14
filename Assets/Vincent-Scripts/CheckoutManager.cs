@@ -11,6 +11,7 @@ public class CheckoutManager : MonoBehaviour
     [Header("Shopify API")]
     public string endpoint;
     public string storeFrontAccessToken;
+    public string shopDomain = "htn2025.myshopify.com";
 
     public void GetCartTotal(List<string> productIds, System.Action<string> onTotalReady)
     {
@@ -86,6 +87,22 @@ public class CheckoutManager : MonoBehaviour
         public string query;
     }
 
+    public void OpenShopifyCheckout(Dictionary<string, int> variantIdToQuantity)
+    {
+        var cartItems = new List<string>();
+        foreach (var kvp in variantIdToQuantity)
+        {
+            cartItems.Add($"{kvp.Key}:{kvp.Value}");
+        }
+        string cartString = string.Join(",", cartItems);
+
+        // Building full URL:
+        string url = $"https://{shopDomain}/cart/{cartString}";
+
+        // Open URL in default browser:
+        Application.OpenURL(url);
+    }
+
     private void Awake()
     {
         var envPath = Path.Combine(Application.dataPath, "..", ".env");
@@ -100,5 +117,8 @@ public class CheckoutManager : MonoBehaviour
                     endpoint = line.Substring("SHOPIFY_ENDPOINT=".Length);
             }
         }
+
+        // On checkout the default browser will pop up with the Shopify checkout page:
+
     }
 }
