@@ -9,21 +9,24 @@ public class ScanPrompter : MonoBehaviour
     
     async void Start()
     {
-        Debug.Log("Loading scene from device...");
+        // Force the system scan UI
+        OVRScene.RequestSpaceSetup();
 
+        // Then wait for MRUK to finish loading the scene
         var result = await MRUK.Instance.LoadSceneFromDevice(
-            requestSceneCaptureIfNoDataFound: true,
+            requestSceneCaptureIfNoDataFound: false,
             removeMissingRooms: true
         );
 
         if (result == MRUK.LoadDeviceResult.Success)
         {
-            Debug.Log("Scene loaded successfully!");
+            Debug.Log("✅ Scan complete, scene loaded with " 
+                      + MRUK.Instance.GetCurrentRoom().Anchors.Count + " anchors.");
             OnSceneReady();
         }
         else
         {
-            Debug.LogWarning("Scene load failed: " + result);
+            Debug.LogWarning("❌ Scan failed or was cancelled: " + result);
         }
     }
 

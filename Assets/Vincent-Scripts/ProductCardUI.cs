@@ -1,7 +1,6 @@
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
-using ShopifyProductFetcher;
 
 public class ProductCardUI : MonoBehaviour
 {
@@ -21,7 +20,7 @@ public class ProductCardUI : MonoBehaviour
         fetcher = fetcherRef;
         titleText.text = item.title;
         // Load thumbail
-        viewButton.onClick.AddListner(OnViewClicked);
+        // viewButton.onClick.AddListner(OnViewClicked);
     }
 
     private void OnViewClicked()

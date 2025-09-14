@@ -13,6 +13,8 @@ using GLTFast;
 
 public class ShopifyProductFetcher : MonoBehaviour
 {
+    [SerializeField] private StoreUI storeUI;
+    
     // === Output ===
     public List<VRItem> Items = new List<VRItem>();
 
@@ -405,6 +407,9 @@ query GetProducts($first:Int!) {
                 Debug.LogWarning($"Failed to download image from {imageUrl}: {www.error}");
             }
         }
+        
+        // Create in UI
+        storeUI.AddItem(Items[itemIndex]);
     }
     
     /// <summary>
