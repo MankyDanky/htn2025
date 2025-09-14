@@ -25,16 +25,20 @@ public class AudioModelRecorder : MonoBehaviour
     [SerializeField] private TextMeshProUGUI modelUrlText;
     
     private bool isRecording = false;
+    private bool canRecord = true;
     private AudioClip recordedClip;
     private string recordedFilePath;
     private string currentTaskId = null;
+    private float angularVelocity = 0f;
+    private RectTransform buttonRect;
     
     private void Start()
     {
+        buttonRect = recordButton.GetComponent<RectTransform>();
         // Get the default microphone if not specified
         if (string.IsNullOrEmpty(microphoneName))
             microphoneName = Microphone.devices.Length > 0 ? Microphone.devices[0] : null;
-        
+
         if (microphoneName == null)
         {
             Debug.LogError("No microphone found!");
@@ -42,23 +46,40 @@ public class AudioModelRecorder : MonoBehaviour
             if (recordButton) recordButton.interactable = false;
             return;
         }
-        
+
         if (audioSource == null)
             audioSource = GetComponent<AudioSource>();
-        
+
         if (recordButton)
             recordButton.onClick.AddListener(ToggleRecording);
-            
+
         if (statusText)
             statusText.text = "Ready to record";
+    }
+
+    private void Update()
+    {
+        if (canRecord)
+        {
+            angularVelocity = Mathf.Max(angularVelocity - Time.deltaTime * 20f, 0f);
+        }
+        else
+        {
+            angularVelocity = Mathf.Min(angularVelocity + Time.deltaTime * 50f, (1.15f * Mathf.Sin(3f * Time.time)) * 200f);
+        }
+        buttonRect.Rotate(0f, 0f, angularVelocity * Time.deltaTime);
     }
     
     public void ToggleRecording()
     {
         if (isRecording)
+        {
             StopRecording();
-        else
+        }
+        else if (canRecord)
+        {
             StartRecording();
+        }
     }
     
     private void StartRecording()
@@ -93,7 +114,7 @@ public class AudioModelRecorder : MonoBehaviour
     private void StopRecording()
     {
         if (!isRecording) return;
-        
+        canRecord = false;
         isRecording = false;
         if (statusText) statusText.text = "Processing...";
         
@@ -173,6 +194,7 @@ public class AudioModelRecorder : MonoBehaviour
         }
         else
         {
+            canRecord = true;
             if (modelUrlText) modelUrlText.text = "No model requested";
             if (statusText) statusText.text = "Ready to record";
         }
@@ -207,16 +229,19 @@ public class AudioModelRecorder : MonoBehaviour
                     // Model is ready!
                     if (modelUrlText) modelUrlText.text = status.model_url;
                     if (statusText) statusText.text = "3D Model ready!";
+                    canRecord = true;
                     
                     // Here you could implement code to download and load the 3D model
                     // StartCoroutine(LoadModelFromUrl(status.model_url));
-                    
+
                     yield break;
                 }
                 else if (status.status == "failed")
                 {
                     if (statusText) statusText.text = "Model generation failed";
                     Debug.LogError($"Model generation failed: {status.error}");
+                    canRecord = true;
+
                     yield break;
                 }
                 
