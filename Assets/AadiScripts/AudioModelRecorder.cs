@@ -187,21 +187,17 @@ public class ModelGeneratorAI : MonoBehaviour
         
         LogDebug("Transcribing audio with Whisper API...");
         
-        // Read the audio file
         byte[] audioData = File.ReadAllBytes(recordedFilePath);
         
-        // Create form with audio file
         WWWForm form = new WWWForm();
         form.AddBinaryData("file", audioData, "audio.wav", "audio/wav");
         form.AddField("model", "whisper-1");
         form.AddField("response_format", "json");
         
-        // Create the request
         using (UnityWebRequest www = UnityWebRequest.Post("https://api.openai.com/v1/audio/transcriptions", form))
         {
             www.SetRequestHeader("Authorization", "Bearer " + openAIApiKey);
             
-            // Send request
             yield return www.SendWebRequest();
             
             if (www.result != UnityWebRequest.Result.Success)
@@ -211,32 +207,21 @@ public class ModelGeneratorAI : MonoBehaviour
             }
             else
             {
-                // Parse the response
                 string responseJson = www.downloadHandler.text;
                 LogDebug("Whisper response: " + responseJson);
                 
-                // Extract the transcription from the JSON response
-                try
+                JObject transcriptionData = JObject.Parse(responseJson);
+                string transcription = transcriptionData["text"]?.ToString();
+                
+                if (string.IsNullOrEmpty(transcription))
                 {
-                    // Parse as JObject to handle complex structure
-                    JObject transcriptionData = JObject.Parse(responseJson);
-                    string transcription = transcriptionData["text"]?.ToString();
-                    
-                    if (string.IsNullOrEmpty(transcription))
-                    {
-                        LogError("No text found in transcription response");
-                        onComplete?.Invoke(null);
-                    }
-                    else
-                    {
-                        LogDebug($"Successfully extracted transcription: \"{transcription}\"");
-                        onComplete?.Invoke(transcription);
-                    }
-                }
-                catch (Exception e)
-                {
-                    LogError($"Error parsing transcription: {e.Message}");
+                    LogError("No text found in transcription response");
                     onComplete?.Invoke(null);
+                }
+                else
+                {
+                    LogDebug($"Successfully extracted transcription: \"{transcription}\"");
+                    onComplete?.Invoke(transcription);
                 }
             }
         }
@@ -247,7 +232,6 @@ public class ModelGeneratorAI : MonoBehaviour
         LogDebug("Sending to GPT for processing...");
         if (statusText) statusText.text = "AI processing...";
         
-        // Create the GPT request with tool calling
         var requestData = new
         {
             model = "gpt-4",
@@ -292,11 +276,8 @@ public class ModelGeneratorAI : MonoBehaviour
             tool_choice = "auto"
         };
         
-        // Convert to JSON
         string jsonRequestData = JsonConvert.SerializeObject(requestData);
-        LogDebug("GPT Request: " + jsonRequestData);
         
-        // Create request
         using (UnityWebRequest www = new UnityWebRequest("https://api.openai.com/v1/chat/completions", "POST"))
         {
             byte[] bodyRaw = Encoding.UTF8.GetBytes(jsonRequestData);
@@ -305,7 +286,6 @@ public class ModelGeneratorAI : MonoBehaviour
             www.SetRequestHeader("Content-Type", "application/json");
             www.SetRequestHeader("Authorization", "Bearer " + openAIApiKey);
             
-            // Send request
             yield return www.SendWebRequest();
             
             if (www.result != UnityWebRequest.Result.Success)
@@ -315,50 +295,37 @@ public class ModelGeneratorAI : MonoBehaviour
             }
             else
             {
-                // Parse the response
                 string responseJson = www.downloadHandler.text;
                 LogDebug("GPT Response: " + responseJson);
                 
-                try
+                JObject responseData = JObject.Parse(responseJson);
+                JToken choiceToken = responseData["choices"]?[0];
+                JToken messageToken = choiceToken?["message"];
+                
+                string responseText = messageToken?["content"]?.ToString();
+                JToken toolCalls = messageToken?["tool_calls"];
+                
+                if (toolCalls != null && toolCalls.HasValues)
                 {
-                    // Parse GPT response
-                    JObject responseData = JObject.Parse(responseJson);
-                    JToken choiceToken = responseData["choices"]?[0];
-                    JToken messageToken = choiceToken?["message"];
+                    // Tool call was used - extract model description
+                    string functionName = toolCalls[0]["function"]["name"].ToString();
+                    string functionArgs = toolCalls[0]["function"]["arguments"].ToString();
                     
-                    string responseText = messageToken?["content"]?.ToString();
-                    JToken toolCalls = messageToken?["tool_calls"];
-                    
-                    if (toolCalls != null && toolCalls.HasValues)
+                    if (functionName == "generate_3d_model")
                     {
-                        // Tool call was used - extract model description
-                        string toolCallId = toolCalls[0]["id"].ToString();
-                        string functionName = toolCalls[0]["function"]["name"].ToString();
-                        string functionArgs = toolCalls[0]["function"]["arguments"].ToString();
+                        var args = JObject.Parse(functionArgs);
+                        string modelDescription = args["description"].ToString();
                         
-                        if (functionName == "generate_3d_model")
-                        {
-                            var args = JObject.Parse(functionArgs);
-                            string modelDescription = args["description"].ToString();
-                            
-                            // Generate TTS response immediately
-                            string ttsResponse = "I'm generating your 3D model. This might take a minute or two, but I'll have it ready for you soon!";
-                            StartCoroutine(GenerateTTS(ttsResponse));
-                            
-                            // Start model generation in background
-                            StartCoroutine(Generate3DModel(modelDescription));
-                        }
-                    }
-                    else if (!string.IsNullOrEmpty(responseText))
-                    {
-                        // Regular text response - convert to speech
-                        StartCoroutine(GenerateTTS(responseText));
+                        // Generate TTS response and start model generation
+                        string ttsResponse = "I'm generating your 3D model. This might take a minute or two, but I'll have it ready for you soon!";
+                        StartCoroutine(GenerateTTS(ttsResponse));
+                        StartCoroutine(Generate3DModel(modelDescription));
                     }
                 }
-                catch (Exception e)
+                else if (!string.IsNullOrEmpty(responseText))
                 {
-                    LogError($"Error parsing GPT response: {e.Message}");
-                    if (statusText) statusText.text = "Error processing response";
+                    // Regular text response - convert to speech
+                    StartCoroutine(GenerateTTS(responseText));
                 }
             }
         }
@@ -369,7 +336,7 @@ public class ModelGeneratorAI : MonoBehaviour
         LogDebug($"Generating TTS for: \"{text}\"");
         if (statusText) statusText.text = "Generating speech...";
         
-        // Create TTS request - using MP3 format for better compatibility
+        // Create TTS request using MP3 format
         var requestData = new
         {
             model = "tts-1",
@@ -379,7 +346,6 @@ public class ModelGeneratorAI : MonoBehaviour
         };
         
         string jsonRequestData = JsonConvert.SerializeObject(requestData);
-        LogDebug($"TTS request: {jsonRequestData}");
         
         using (UnityWebRequest www = new UnityWebRequest("https://api.openai.com/v1/audio/speech", "POST"))
         {
@@ -389,7 +355,6 @@ public class ModelGeneratorAI : MonoBehaviour
             www.SetRequestHeader("Content-Type", "application/json");
             www.SetRequestHeader("Authorization", "Bearer " + openAIApiKey);
             
-            // Send request
             yield return www.SendWebRequest();
             
             if (www.result != UnityWebRequest.Result.Success)
@@ -400,24 +365,10 @@ public class ModelGeneratorAI : MonoBehaviour
             else
             {
                 LogDebug("TTS response received successfully");
-                
-                // Get MP3 audio data
                 byte[] audioBytes = www.downloadHandler.data;
                 LogDebug($"Received {audioBytes.Length} bytes of MP3 audio data");
                 
-                // Save TTS response to persistent location for debugging
-                string ttsFilePath = Path.Combine(Application.dataPath, "../", "tts_response.mp3");
-                try
-                {
-                    File.WriteAllBytes(ttsFilePath, audioBytes);
-                    LogDebug($"TTS response saved to: {ttsFilePath}");
-                }
-                catch (Exception e)
-                {
-                    LogError($"Failed to save TTS response: {e.Message}");
-                }
-                
-                // Use Unity's built-in method to load MP3 data as AudioClip
+                // Load and play the audio directly
                 StartCoroutine(LoadAudioClipFromMP3(audioBytes));
             }
         }
@@ -427,7 +378,6 @@ public class ModelGeneratorAI : MonoBehaviour
     {
         LogDebug($"Loading AudioClip from {audioData.Length} bytes of MP3 data");
         
-        // Validate audio data first
         if (audioData == null || audioData.Length == 0)
         {
             LogError("Audio data is null or empty");
@@ -436,60 +386,22 @@ public class ModelGeneratorAI : MonoBehaviour
             yield break;
         }
         
-        // Check if it looks like MP3 data (MP3 files typically start with ID3 tag or MP3 frame header)
-        if (audioData.Length > 3)
-        {
-            string header = System.Text.Encoding.ASCII.GetString(audioData, 0, Math.Min(3, audioData.Length));
-            LogDebug($"Audio data header: {header} (hex: {BitConverter.ToString(audioData, 0, Math.Min(10, audioData.Length))})");
-        }
+        // Save MP3 data to temporary file
+        string tempPath = Path.Combine(Application.temporaryCachePath, "tts_temp.mp3");
+        File.WriteAllBytes(tempPath, audioData);
+        LogDebug($"Saved MP3 to temp file: {tempPath}");
         
-        string tempPath = null;
-        UnityWebRequest audioRequest = null;
+        // Load using Unity's AudioClip loader
+        string fileUri = "file://" + tempPath.Replace("\\", "/");
+        LogDebug($"Loading audio from URI: {fileUri}");
         
-        try
+        using (UnityWebRequest audioRequest = UnityWebRequestMultimedia.GetAudioClip(fileUri, AudioType.MPEG))
         {
-            // Save MP3 data to temporary file in a better location
-            tempPath = Path.Combine(Application.dataPath, "../", "tts_temp_debug.mp3");
-            File.WriteAllBytes(tempPath, audioData);
-            LogDebug($"Saved MP3 to temp file: {tempPath}");
+            yield return audioRequest.SendWebRequest();
             
-            // Verify file was written correctly
-            if (File.Exists(tempPath))
-            {
-                FileInfo fileInfo = new FileInfo(tempPath);
-                LogDebug($"Temp file created successfully: {fileInfo.Length} bytes");
-            }
-            else
-            {
-                LogError("Failed to create temp file");
-                yield break;
-            }
-            
-            // Use Unity's AudioClip loader with proper file URI
-            string fileUri = "file://" + tempPath.Replace("\\", "/");
-            LogDebug($"Loading audio from URI: {fileUri}");
-            
-            audioRequest = UnityWebRequestMultimedia.GetAudioClip(fileUri, AudioType.MPEG);
-        }
-        catch (Exception e)
-        {
-            LogError($"Error setting up MP3 loading: {e.Message}\n{e.StackTrace}");
-            if (statusText && statusText.text != "Generating 3D model...")
-                statusText.text = "Audio setup failed";
-            yield break;
-        }
-        
-        // Send the request outside the try block to avoid yield issues
-        LogDebug("Sending UnityWebRequest to load audio...");
-        yield return audioRequest.SendWebRequest();
-        LogDebug($"UnityWebRequest completed with result: {audioRequest.result}");
-        
-        try
-        {
             if (audioRequest.result != UnityWebRequest.Result.Success)
             {
                 LogError($"Failed to load audio clip: {audioRequest.error}");
-                LogError($"Response code: {audioRequest.responseCode}");
                 if (statusText && statusText.text != "Generating 3D model...")
                     statusText.text = "Failed to load speech";
             }
@@ -499,220 +411,48 @@ public class ModelGeneratorAI : MonoBehaviour
                 
                 if (audioClip != null && audioClip.length > 0)
                 {
-                    LogDebug($"Successfully created AudioClip: {audioClip.length:F2}s, {audioClip.frequency}Hz, {audioClip.channels} channels, {audioClip.samples} samples");
+                    LogDebug($"Successfully created AudioClip: {audioClip.length:F2}s, {audioClip.frequency}Hz, {audioClip.channels} channels");
                     
-                    // Verify AudioSource is ready
+                    // Ensure AudioSource is properly configured
                     if (audioSource == null)
-                    {
-                        LogError("AudioSource is null!");
-                        yield break;
-                    }
+                        audioSource = gameObject.AddComponent<AudioSource>();
                     
+                    audioSource.Stop(); // Stop any currently playing audio
                     audioSource.clip = audioClip;
-                    audioSource.volume = 1.0f; // Ensure volume is set
+                    audioSource.volume = 1.0f;
+                    audioSource.pitch = 1.0f;
+                    audioSource.loop = false;
+                    
+                    // Play the audio
                     audioSource.Play();
                     
-                    LogDebug($"AudioSource playing: {audioSource.isPlaying}, Volume: {audioSource.volume}");
+                    LogDebug($"Audio playing: {audioSource.isPlaying}, Volume: {audioSource.volume}");
                     
-                    // Update status only if we're not generating a model
                     if (statusText && statusText.text != "Generating 3D model...")
                         statusText.text = "Playing response";
                 }
                 else
                 {
-                    LogError($"Created AudioClip is null or has zero length. AudioClip: {audioClip}, Length: {(audioClip != null ? audioClip.length.ToString() : "null")}");
+                    LogError($"Created AudioClip is null or has zero length");
                     if (statusText && statusText.text != "Generating 3D model...")
                         statusText.text = "Failed to create speech";
                 }
             }
         }
+        
+        // Clean up temp file
+        try
+        {
+            //if (File.Exists(tempPath))
+                //File.Delete(tempPath);
+        }
         catch (Exception e)
         {
-            LogError($"Error processing MP3 audio: {e.Message}\n{e.StackTrace}");
-            if (statusText && statusText.text != "Generating 3D model...")
-                statusText.text = "Audio processing failed";
-        }
-        finally
-        {
-            // Clean up resources
-            if (audioRequest != null)
-                audioRequest.Dispose();
-                
-            // Don't delete the temp file immediately for debugging purposes
-            // Comment out the deletion for now
-            /*
-            if (!string.IsNullOrEmpty(tempPath))
-            {
-                try
-                {
-                    if (File.Exists(tempPath))
-                        File.Delete(tempPath);
-                    LogDebug("Cleaned up temp MP3 file");
-                }
-                catch (Exception e)
-                {
-                    LogDebug($"Could not delete temp file: {e.Message}");
-                }
-            }
-            */
-            LogDebug($"Keeping temp file for debugging: {tempPath}");
+            LogDebug($"Could not delete temp file: {e.Message}");
         }
     }
     
-    private IEnumerator GenerateTTSWAV(string text)
-    {
-        LogDebug($"Generating TTS (WAV format) for: \"{text}\"");
-        if (statusText) statusText.text = "Generating speech (WAV)...";
-        
-        // Create TTS request - using WAV format as fallback
-        var requestData = new
-        {
-            model = "tts-1",
-            voice = "alloy",
-            input = text,
-            response_format = "wav"
-        };
-        
-        string jsonRequestData = JsonConvert.SerializeObject(requestData);
-        LogDebug($"TTS WAV request: {jsonRequestData}");
-        
-        using (UnityWebRequest www = new UnityWebRequest("https://api.openai.com/v1/audio/speech", "POST"))
-        {
-            byte[] bodyRaw = Encoding.UTF8.GetBytes(jsonRequestData);
-            www.uploadHandler = new UploadHandlerRaw(bodyRaw);
-            www.downloadHandler = new DownloadHandlerBuffer();
-            www.SetRequestHeader("Content-Type", "application/json");
-            www.SetRequestHeader("Authorization", "Bearer " + openAIApiKey);
-            
-            // Send request
-            yield return www.SendWebRequest();
-            
-            if (www.result != UnityWebRequest.Result.Success)
-            {
-                LogError($"TTS WAV API Error: {www.error}");
-                if (statusText) statusText.text = "WAV speech generation failed";
-            }
-            else
-            {
-                LogDebug("TTS WAV response received successfully");
-                
-                // Get WAV audio data
-                byte[] audioBytes = www.downloadHandler.data;
-                LogDebug($"Received {audioBytes.Length} bytes of WAV audio data");
-                
-                // Save TTS response to persistent location for debugging
-                string ttsFilePath = Path.Combine(Application.dataPath, "../", "tts_response.wav");
-                try
-                {
-                    File.WriteAllBytes(ttsFilePath, audioBytes);
-                    LogDebug($"TTS WAV response saved to: {ttsFilePath}");
-                }
-                catch (Exception e)
-                {
-                    LogError($"Failed to save TTS WAV response: {e.Message}");
-                }
-                
-                // Use Unity's built-in method to load WAV data as AudioClip
-                StartCoroutine(LoadAudioClipFromWAV(audioBytes));
-            }
-        }
-    }
-    
-    private IEnumerator LoadAudioClipFromWAV(byte[] audioData)
-    {
-        LogDebug($"Loading AudioClip from {audioData.Length} bytes of WAV data");
-        
-        // Validate audio data first
-        if (audioData == null || audioData.Length == 0)
-        {
-            LogError("WAV audio data is null or empty");
-            if (statusText && statusText.text != "Generating 3D model...")
-                statusText.text = "No WAV audio data received";
-            yield break;
-        }
-        
-        string tempPath = null;
-        UnityWebRequest audioRequest = null;
-        
-        try
-        {
-            // Save WAV data to temporary file
-            tempPath = Path.Combine(Application.dataPath, "../", "tts_temp_debug.wav");
-            File.WriteAllBytes(tempPath, audioData);
-            LogDebug($"Saved WAV to temp file: {tempPath}");
-            
-            // Use Unity's AudioClip loader with WAV format
-            string fileUri = "file://" + tempPath.Replace("\\", "/");
-            LogDebug($"Loading WAV audio from URI: {fileUri}");
-            
-            audioRequest = UnityWebRequestMultimedia.GetAudioClip(fileUri, AudioType.WAV);
-        }
-        catch (Exception e)
-        {
-            LogError($"Error setting up WAV loading: {e.Message}\n{e.StackTrace}");
-            if (statusText && statusText.text != "Generating 3D model...")
-                statusText.text = "WAV audio setup failed";
-            yield break;
-        }
-        
-        // Send the request
-        LogDebug("Sending UnityWebRequest to load WAV audio...");
-        yield return audioRequest.SendWebRequest();
-        LogDebug($"WAV UnityWebRequest completed with result: {audioRequest.result}");
-        
-        try
-        {
-            if (audioRequest.result != UnityWebRequest.Result.Success)
-            {
-                LogError($"Failed to load WAV audio clip: {audioRequest.error}");
-                LogError($"WAV Response code: {audioRequest.responseCode}");
-                if (statusText && statusText.text != "Generating 3D model...")
-                    statusText.text = "Failed to load WAV speech";
-            }
-            else
-            {
-                AudioClip audioClip = DownloadHandlerAudioClip.GetContent(audioRequest);
-                
-                if (audioClip != null && audioClip.length > 0)
-                {
-                    LogDebug($"Successfully created WAV AudioClip: {audioClip.length:F2}s, {audioClip.frequency}Hz, {audioClip.channels} channels, {audioClip.samples} samples");
-                    
-                    if (audioSource == null)
-                    {
-                        LogError("AudioSource is null!");
-                        yield break;
-                    }
-                    
-                    audioSource.clip = audioClip;
-                    audioSource.volume = 1.0f;
-                    audioSource.Play();
-                    
-                    LogDebug($"WAV AudioSource playing: {audioSource.isPlaying}, Volume: {audioSource.volume}");
-                    
-                    if (statusText && statusText.text != "Generating 3D model...")
-                        statusText.text = "Playing WAV response";
-                }
-                else
-                {
-                    LogError($"Created WAV AudioClip is null or has zero length. AudioClip: {audioClip}, Length: {(audioClip != null ? audioClip.length.ToString() : "null")}");
-                    if (statusText && statusText.text != "Generating 3D model...")
-                        statusText.text = "Failed to create WAV speech";
-                }
-            }
-        }
-        catch (Exception e)
-        {
-            LogError($"Error processing WAV audio: {e.Message}\n{e.StackTrace}");
-            if (statusText && statusText.text != "Generating 3D model...")
-                statusText.text = "WAV audio processing failed";
-        }
-        finally
-        {
-            if (audioRequest != null)
-                audioRequest.Dispose();
-            LogDebug($"Keeping WAV temp file for debugging: {tempPath}");
-        }
-    }
+
 
     private IEnumerator Generate3DModel(string description)
     {
@@ -812,17 +552,9 @@ public class ModelGeneratorAI : MonoBehaviour
                 string responseJson = www.downloadHandler.text;
                 LogDebug("Meshy preview response: " + responseJson);
                 
-                try
-                {
-                    var responseData = JsonConvert.DeserializeObject<Dictionary<string, string>>(responseJson);
-                    string taskId = responseData.ContainsKey("result") ? responseData["result"] : null;
-                    onComplete?.Invoke(taskId);
-                }
-                catch (Exception e)
-                {
-                    LogError($"Error parsing Meshy response: {e.Message}");
-                    onComplete?.Invoke(null);
-                }
+                var responseData = JsonConvert.DeserializeObject<Dictionary<string, string>>(responseJson);
+                string taskId = responseData.ContainsKey("result") ? responseData["result"] : null;
+                onComplete?.Invoke(taskId);
             }
         }
     }
@@ -858,17 +590,9 @@ public class ModelGeneratorAI : MonoBehaviour
                 string responseJson = www.downloadHandler.text;
                 LogDebug("Meshy refine response: " + responseJson);
                 
-                try
-                {
-                    var responseData = JsonConvert.DeserializeObject<Dictionary<string, string>>(responseJson);
-                    string taskId = responseData.ContainsKey("result") ? responseData["result"] : null;
-                    onComplete?.Invoke(taskId);
-                }
-                catch (Exception e)
-                {
-                    LogError($"Error parsing Meshy response: {e.Message}");
-                    onComplete?.Invoke(null);
-                }
+                var responseData = JsonConvert.DeserializeObject<Dictionary<string, string>>(responseJson);
+                string taskId = responseData.ContainsKey("result") ? responseData["result"] : null;
+                onComplete?.Invoke(taskId);
             }
         }
     }
@@ -912,35 +636,27 @@ public class ModelGeneratorAI : MonoBehaviour
                 string responseJson = www.downloadHandler.text;
                 LogDebug($"Meshy {taskType} polling response: {responseJson}");
                 
-                try
+                var taskResult = JsonConvert.DeserializeObject<MeshyTaskResult>(responseJson);
+                
+                if (taskResult.status == "SUCCEEDED")
                 {
-                    var taskResult = JsonConvert.DeserializeObject<MeshyTaskResult>(responseJson);
-                    
-                    if (taskResult.status == "SUCCEEDED")
-                    {
-                        LogDebug($"Meshy {taskType} task completed successfully");
-                        onComplete?.Invoke(taskResult);
-                        yield break;
-                    }
-                    else if (taskResult.status == "FAILED")
-                    {
-                        LogError($"Meshy {taskType} task failed");
-                        onComplete?.Invoke(taskResult);
-                        yield break;
-                    }
-                    // else still in progress
+                    LogDebug($"Meshy {taskType} task completed successfully");
+                    onComplete?.Invoke(taskResult);
+                    yield break;
                 }
-                catch (Exception e)
+                else if (taskResult.status == "FAILED")
                 {
-                    LogError($"Error parsing Meshy task status: {e.Message}");
+                    LogError($"Meshy {taskType} task failed");
+                    onComplete?.Invoke(taskResult);
+                    yield break;
                 }
+                // else still in progress
             }
             
             attempts++;
             yield return new WaitForSeconds(modelPollingInterval);
         }
         
-        // Timed out
         LogError($"Meshy {taskType} task timed out");
         onComplete?.Invoke(null);
     }
